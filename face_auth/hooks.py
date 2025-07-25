@@ -5,6 +5,11 @@ app_description = "face auht"
 app_email = "ajayshivhare047@gmail.com"
 app_license = "mit"
 
+override_whitelisted_methods = {
+    "face_auth.register_face": "face_auth.api.face.register_face",
+    "face_auth.match_face": "face_auth.api.face.match_face",
+}
+
 # Apps
 # ------------------
 
