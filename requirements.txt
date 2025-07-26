@@ -1,0 +1,4 @@
+# requirements.txt
+dlib>=19.24.0  # This version has wheels for many platforms
+# or specify exact version
+dlib==19.24.4
