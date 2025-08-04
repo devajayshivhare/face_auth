@@ -4,6 +4,70 @@ import face_recognition
 import numpy as np
 from PIL import Image, ImageOps, ExifTags
 from frappe.utils.file_manager import save_file
+import math
+from datetime import datetime
+# print("Debug point 1")
+# frappe.logger().debug("Debug data:")
+# frappe.log_error("Debug info", "Custom Reference")
+
+def get_employee_reference_image(employee_id):
+    """
+    Get the reference image path for an employee from their attachments
+    Returns the physical file path or None if not found
+    """
+    # Find the most recent face reference image attachment
+    reference_file = frappe.db.get_value("File", {
+        "attached_to_doctype": "Employee",
+        "attached_to_name": employee_id,
+        "file_name": ["like", "face_reference_%"]
+    }, ["file_url", "name"], order_by="creation desc")
+    
+    if not reference_file:
+        frappe.log_error(f"No reference image found for employee {employee_id}", "Face Matching")
+        return None, None  # Return tuple of Nones instead of single None
+    
+    file_url, file_docname = reference_file
+    
+    # Convert URL to physical path
+    # URL format: /files/filename.jpg
+    # Physical path: sites/{site}/public/files/filename.jpg
+    file_path = os.path.join(frappe.get_site_path('public', 'files'), file_url[7:])
+    
+    return file_path, file_docname
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """
+    Calculate the great circle distance between two points 
+    on the earth (specified in decimal degrees)
+    """
+    # Convert decimal degrees to radians
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    
+    # Haversine formula
+    dlon = lon2 - lon1 
+    dlat = lat2 - lat1 
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.asin(math.sqrt(a)) 
+    r = 6371  # Radius of earth in kilometers
+    return c * r  # Distance in kilometers
+
+def get_office_coordinates(employee_id):
+    """Get office coordinates from Employee document"""
+    try:
+        # Assuming Employee doctype has fields: office_latitude, office_longitude, geofence_radius
+        employee = frappe.get_doc("Employee", employee_id)
+        office_lat = employee.get("office_latitude")
+        office_long = employee.get("office_longitude")
+        geofence_radius = employee.get("geofence_radius", 0.5)  # Default to 0.5 km if not set
+         
+        if not office_lat or not office_long:
+            frappe.log_error(f"Office coordinates not set for employee {employee_id}", "Geofencing Error")
+            return None, None, None
+            
+        return float(office_lat), float(office_long), float(geofence_radius)
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), f"Error fetching office coordinates for {employee_id}")
+        return None, None, None
 
 def correct_image_orientation(image_path):
     """Correct image orientation using EXIF data and resize for optimal face detection"""
@@ -52,13 +116,20 @@ def register_face():
     if not user_id:
         return {"message": "missing_user_id"}
 
+    # Verify Employee document exists
+    if not frappe.db.exists("Employee", user_id):
+        return {"message": "invalid_employee_id"}
+
     file = frappe.request.files['image']
     filename = f'reference_{user_id}.jpg'
     save_path = os.path.join(frappe.get_site_path('public', 'files'), filename)
 
-    # Save the uploaded file
+    # Read file content once for reuse
+    file_content = file.read()
+    
+    # Save the uploaded file to disk
     with open(save_path, 'wb') as f:
-        f.write(file.read())
+        f.write(file_content)
 
     # Correct EXIF orientation and resize
     if not correct_image_orientation(save_path):
@@ -71,7 +142,37 @@ def register_face():
         
         if not encodings:
             return {"message": "no_face_detected"}
+        
+        # Save as attachment to Employee document
+        try:
+            # Create unique filename with timestamp to prevent overwrites
+            # attachment_filename = f"face_reference_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
             
+            # Save file as attachment to Employee document
+            file_doc = save_file(
+                # attachment_filename,
+                filename,
+                file_content,
+                "Employee",
+                user_id,
+                folder="Home",
+                is_private=0
+            )
+            frappe.db.commit()
+            
+            # Optional: Store file URL in Employee custom field
+            # frappe.db.set_value("Employee", user_id, "face_reference_image", file_doc.file_url)
+            
+            # Log successful attachment
+            # frappe.log_info(
+            #     f"Face reference image attached to Employee {user_id}",
+            #     "Face Registration"
+            # )
+            
+        except Exception as e:
+            frappe.log_error(frappe.get_traceback(), "Employee Attachment Error")
+            return {"message": "attachment_save_failed"}
+        
         return {"message": "success"}
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Face Encoding Error")
@@ -83,7 +184,6 @@ def match_face():
     latitude = frappe.form_dict.get('latitude')
     longitude = frappe.form_dict.get('longitude')
     device_id = frappe.form_dict.get('device_id')
-
     if not user_id:
         return {"message": {"matched": False, "reason": "missing_user_id"}}
 
@@ -92,14 +192,10 @@ def match_face():
         filename = f'upload_{user_id}_{frappe.generate_hash(length=8)}.jpg'
         upload_path = os.path.join(frappe.get_site_path('public', 'files'), filename)
 
-        # Save the uploaded file
+        # Read file content once and save it to disk
+        file_content = file.read()
         with open(upload_path, 'wb') as f:
-            f.write(file.read())
-
-         # Read file content once and save it to disk
-        # file_content = file.read()  # Read file content only once
-        # with open(upload_path, 'wb') as f:
-            # f.write(file_content)  # Save to disk
+            f.write(file_content)
 
         # Correct EXIF orientation and resize
         if not correct_image_orientation(upload_path):
@@ -122,9 +218,18 @@ def match_face():
         ref_filename = f'reference_{user_id}.jpg'
         ref_image_path = os.path.join(frappe.get_site_path('public', 'files'), ref_filename)
 
-        if not os.path.exists(ref_image_path):
-            return {"message": {"matched": False, "reason": "reference_image_missing"}}
+         # ====== GET REFERENCE IMAGE FROM EMPLOYEE DOCTYPE ======
+        # ref_image_path, ref_file_docname = get_employee_reference_image(user_id)
 
+        # ✅ FIX: Properly validate ref_image_path before using os.path.exists()
+        if not ref_image_path:
+            frappe.log_error(f"Reference image path is None for {user_id}", "Face Matching")
+            return {"message": {"matched": False, "reason": "reference_image_missing"}}
+        
+        if not os.path.exists(ref_image_path):
+            frappe.log_error(f"Reference image file does not exist at path: {ref_image_path}", "Face Matching")
+            return {"message": {"matched": False, "reason": "reference_image_file_not_found"}}
+        
         # Correct reference image if needed
         if not correct_image_orientation(ref_image_path):
             return {"message": {"matched": False, "reason": "reference_image_corruption"}}
@@ -146,34 +251,71 @@ def match_face():
         confidence = max(0, min(100, (1.0 - distance) * 100))
         match_result = distance <= 0.5
 
-        # If face match is successful, save geofencing data
+        # If face match is successful, validate geofencing before saving
         if match_result and latitude and longitude:
             try:
+                # Convert to floats
+                latitude = float(latitude)
+                longitude = float(longitude)
+                
+                # Get office coordinates from Employee document
+                office_lat, office_long, geofence_radius = get_office_coordinates(user_id)
+                
+                # Check if coordinates are valid
+                if not office_lat or not office_long:
+                    return {
+                        "message": {
+                            "matched": True,
+                            "distance": round(float(distance), 4),
+                            "confidence": round(confidence, 1),
+                            "checkin_saved": False,
+                            "error": "office_coordinates_not_set"
+                        }
+                    }
+                
+                # Calculate distance from office
+                distance_from_office = calculate_distance(
+                    latitude, longitude, 
+                    office_lat, office_long
+                )
+                
+                # Check if within geofence radius
+                if distance_from_office > geofence_radius:
+                    return {
+                        "message": {
+                            "matched": True,
+                            "distance": round(float(distance), 4),
+                            "confidence": round(confidence, 1),
+                            "checkin_saved": False,
+                            "error": f"outside_geofence_radius",
+                            "distance_from_office": round(distance_from_office, 3),
+                            "geofence_radius": geofence_radius
+                        }
+                    }
+                
+                # Create checkin record (only if within geofence)
                 checkin_doc = frappe.get_doc({
                     "doctype": "Employee Checkin",
                     "employee": user_id,
                     "time": frappe.utils.now_datetime(),
                     "device_id": device_id,
-                    "latitude": float(latitude),
-                    "longitude": float(longitude),
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "location": f"{latitude}, {longitude}",
                     "skip_auto_attendance": 0,
                     "attendance": None
                 })
                 checkin_doc.insert(ignore_permissions=True)
                 frappe.db.commit()
 
-                # ✅ FIX: Read file content as bytes for save_file()
-                with open(upload_path, 'rb') as f:
-                    file_content = f.read()  # Get actual bytes content
-
-                # 📎 Save photo as attachment
+                # Link the existing file to the Employee Checkin document
                 save_file(
                     filename,
-                    file_content,  # Read saved image from disk
-                    "Employee Checkin",       # DocType
-                    checkin_doc.name,          # Document Name
-                    folder="Home",             # Optional folder
-                    is_private=0               # Publicly accessible
+                    file_content,
+                    "Employee Checkin",
+                    checkin_doc.name,
+                    folder="Home",
+                    is_private=0
                 )
                 frappe.db.commit()
 
@@ -183,7 +325,10 @@ def match_face():
                         "distance": round(float(distance), 4),
                         "confidence": round(confidence, 1),
                         "checkin_saved": True,
-                        "checkin_name": checkin_doc.name
+                        "checkin_name": checkin_doc.name,
+                        "distance_from_office": round(distance_from_office, 3),
+                        "geofence_radius": geofence_radius,
+                        # "reference_image": ref_file_docname  # Return reference image doc name
                     }
                 }
             
@@ -199,6 +344,7 @@ def match_face():
                     }
                 }
         
+        # Return confidence even when match fails (for debugging)
         return {
             "message": {
                 "matched": match_result,
