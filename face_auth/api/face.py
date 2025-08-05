@@ -2,41 +2,10 @@ import frappe
 import os
 import face_recognition
 import numpy as np
-from PIL import Image, ImageOps, ExifTags
-from frappe.utils.file_manager import save_file
+from PIL import Image, ExifTags
 import math
 from datetime import datetime
-# from frappe.desk.form.assign_to import delete_assignment
 from frappe.desk.form.load import get_attachments
-
-# print("Debug point 1")
-# frappe.logger().debug("Debug data:")
-# frappe.log_error("Debug info", "Custom Reference")
-
-def get_employee_reference_image(employee_id):
-    """
-    Get the reference image path for an employee from their attachments
-    Returns the physical file path or None if not found
-    """
-    # Find the most recent face reference image attachment
-    reference_file = frappe.db.get_value("File", {
-        "attached_to_doctype": "Employee",
-        "attached_to_name": employee_id,
-        "file_name": ["like", "face_reference_%"]
-    }, ["file_url", "name"], order_by="creation desc")
-    
-    if not reference_file:
-        frappe.log_error(f"No reference image found for employee {employee_id}", "Face Matching")
-        return None, None  # Return tuple of Nones instead of single None
-    
-    file_url, file_docname = reference_file
-    
-    # Convert URL to physical path
-    # URL format: /files/filename.jpg
-    # Physical path: sites/{site}/public/files/filename.jpg
-    file_path = os.path.join(frappe.get_site_path('public', 'files'), file_url[7:])
-    
-    return file_path, file_docname
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     """
@@ -147,76 +116,6 @@ def get_employee_reference_image(employee_id):
     except frappe.DoesNotExistError:
         return None
     
-# @frappe.whitelist(allow_guest=True)
-# def register_face():
-#     user_id = frappe.form_dict.get('user_id')
-#     if not user_id:
-#         return {"message": "missing_user_id"}
-
-#     # Verify Employee document exists
-#     if not frappe.db.exists("Employee", user_id):
-#         return {"message": "invalid_employee_id"}
-
-#     file = frappe.request.files['image']
-#     filename_without_ext, ext = os.path.splitext(file.filename)
-#     new_filename = f"{filename_without_ext}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
-#     save_path = os.path.join(frappe.get_site_path('public', 'files'), new_filename)
-   
-#     # Read file content once for reuse
-#     file_content = file.read()
-    
-#     # Save the uploaded file to disk
-#     with open(save_path, 'wb') as f:
-#         f.write(file_content)
-#     # return
-
-#     # Correct EXIF orientation and resize
-#     if not correct_image_orientation(save_path):
-#         return {"message": "image_processing_failed"}
-
-#     # Load and process image
-#     try:
-#         image = face_recognition.load_image_file(save_path)
-#         encodings = face_recognition.face_encodings(image, num_jitters=1, model="large")
-        
-#         if not encodings:
-#             return {"message": "no_face_detected"}
-        
-#         # Save as attachment to Employee document
-#         try:
-#             # Create unique filename with timestamp to prevent overwrites
-#             # attachment_filename = f"face_reference_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-            
-#             # Save file as attachment to Employee document
-#             file_doc = save_file(
-#                 # attachment_filename,
-#                 new_filename,
-#                 file_content,
-#                 "Employee",
-#                 user_id,
-#                 folder="Home",
-#                 is_private=0
-#             )
-#             frappe.db.commit()
-            
-#             # Optional: Store file URL in Employee custom field
-#             # frappe.db.set_value("Employee", user_id, "face_reference_image", file_doc.file_url)
-            
-#             # Log successful attachment
-#             # frappe.log_info(
-#             #     f"Face reference image attached to Employee {user_id}",
-#             #     "Face Registration"
-#             # )
-            
-#         except Exception as e:
-#             frappe.log_error(frappe.get_traceback(), "Employee Attachment Error")
-#             return {"message": "attachment_save_failed"}
-        
-#         return {"message": "success"}
-#     except Exception as e:
-#         frappe.log_error(frappe.get_traceback(), "Face Encoding Error")
-#         return {"message": "face_encoding_failed"}
-
 @frappe.whitelist(allow_guest=True)
 def register_face():
     temp_files = []  # Track all temporary files
@@ -256,17 +155,11 @@ def register_face():
     with open(save_path, 'wb') as f:
         f.write(file_content)
     temp_files.append(save_path)  # Track this temporary file
-    # Correct EXIF orientation and resize
-    # return
     if not correct_image_orientation(save_path):
         return {"message": "image_processing_failed"}
-    # <<< CHANGE START >>>
-    # Now, load the *corrected* image to check for faces and for saving
     with open(save_path, 'rb') as f:
         corrected_file_content = f.read()
-        # <<< CHANGE END >>>
-    # Load and process image
-    # Face encoding check (assume function exists)
+
     try:
         image = face_recognition.load_image_file(save_path)
         encodings = face_recognition.face_encodings(image, num_jitters=1, model="large")
@@ -322,28 +215,19 @@ def update_face():
     if not frappe.db.exists("Employee", user_id):
         return {"message": "invalid_employee_id"}
 
-    # Unlike register, we allow update even if not registered yet
-    # Or require already registered? Your choice.
-    # Let's allow both: new and update
-
-     # Step 2: Fetch reference image from File doctype
     ref_file_doc = get_employee_reference_image(user_id)
     if not ref_file_doc:
             return {"message": {"matched": False, "reason": "reference_image_missing"}}
     upload_path_last = os.path.join(frappe.get_site_path('public', 'files'), ref_file_doc.file_name)
-    temp_files.append(upload_path_last)  # ← Track it
-    # frappe.log(ref_file_doc.file_name)
-    # return
+    temp_files.append(upload_path_last) 
+
     if not ref_file_doc:
         return {"message": {"matched": False, "reason": "reference_image_missing"}}
-    # ref_image_path = os.path.join(frappe.get_site_path('public', 'files'), ref_file_doc.file_name)
 
     file = frappe.request.files.get('image')
     if not file:
         return {"message": "no_image_provided"}
 
-
-    # filename = secure_filename(file.filename)
     filename_without_ext, ext = os.path.splitext(file.filename)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     new_filename = f"{filename_without_ext}_{timestamp}{ext}"
@@ -355,7 +239,7 @@ def update_face():
     file_content = file.read()
     with open(save_path, 'wb') as f:
         f.write(file_content)
-    temp_files.append(save_path)  # Track this temporary file
+    temp_files.append(save_path) 
 
     if not correct_image_orientation(save_path):
         return {"message": "image_processing_failed"}
@@ -373,9 +257,6 @@ def update_face():
         frappe.log_error(frappe.get_traceback(), "Face Encoding Error")
         return {"message": "face_encoding_failed"}
 
-    # -----------------------------
-    # Delete old attachments
-    # -----------------------------
     try:
         attachments = frappe.get_all("File", {
             "attached_to_doctype": "Employee",
@@ -388,9 +269,6 @@ def update_face():
         frappe.log_error(frappe.get_traceback(), "Cleanup Failed")
         return {"message": "cleanup_failed"}
 
-    # -----------------------------
-    # Save new file
-    # -----------------------------
     try:
         file_doc = frappe.get_doc({
             "doctype": "File",
@@ -422,30 +300,6 @@ def update_face():
             except Exception as e:
                 frappe.log_error(f"Failed to delete {file_path}: {str(e)}", "File Cleanup Error")
     
-# @frappe.whitelist(allow_guest=True)
-# def reset_face_registration(user_id):
-#     ref_file_doc = get_employee_reference_image(user_id)
-#     if not ref_file_doc:
-#             return {"message": {"matched": False, "reason": "reference_image_missing"}}
-#     upload_path_last = os.path.join(frappe.get_site_path('public', 'files'), ref_file_doc.file_name)
-
-#     if not frappe.db.exists("Employee", user_id):
-#         return {"message": "invalid_employee_id"}
-
-#     frappe.db.set_value("Employee", user_id, "face_registered", 0)
-
-#     # Optionally delete attachments
-#     attachments = frappe.get_all("File", {
-#         "attached_to_doctype": "Employee",
-#         "attached_to_name": user_id
-#     })
-#     for a in attachments:
-#         frappe.delete_doc("File", a.name, ignore_permissions=True)
-
-#     frappe.db.commit()
-#     os.remove(upload_path_last)  # Remove the last uploaded file
-#     return {"message": "reset"}
-
 @frappe.whitelist(allow_guest=True)
 def reset_face_registration(user_id):
     """
@@ -477,12 +331,7 @@ def reset_face_registration(user_id):
         except Exception as e:
             frappe.log_error(f"Failed to delete file doc {att.name}: {e}", "Face Registration Reset Error")
     
-    # Commit all changes to the database
     frappe.db.commit()
-
-    # <<< CHANGE >>>
-    # The 'os.remove()' call has been removed as it is redundant and causes the error.
-    # frappe.delete_doc() already handled the file deletion.
     
     return {"status": "success", "message": "face_registration_reset_successfully"}
 
@@ -500,7 +349,6 @@ def match_face():
 
     try:
         file = frappe.request.files['image']
-        # filename = f'upload_{user_id}_{frappe.generate_hash(length=8)}.jpg'
         upload_path = os.path.join(frappe.get_site_path('public', 'files'), file.filename)
 
         # Read file content once and save it to disk
@@ -525,22 +373,11 @@ def match_face():
 
         uploaded_encoding = uploaded_encodings[0]
 
-        # Process reference image
-        # ref_filename = f'reference_{user_id}.jpg'
 
-        # Step 2: Fetch reference image from File doctype
         ref_file_doc = get_employee_reference_image(user_id)
-        # frappe.log(ref_file_doc.file_name)
-        # return
         if not ref_file_doc:
             return {"message": {"matched": False, "reason": "reference_image_missing"}}
         ref_image_path = os.path.join(frappe.get_site_path('public', 'files'), ref_file_doc.file_name)
-
-        # if not correct_image_orientation(ref_image_path):
-        #     return {"message": "image_processing_failed"}
-        # return
-         # ====== GET REFERENCE IMAGE FROM EMPLOYEE DOCTYPE ======
-        # ref_image_path, ref_file_docname = get_employee_reference_image(user_id)
 
         # ✅ FIX: Properly validate ref_image_path before using os.path.exists()
         if not ref_image_path:
@@ -551,17 +388,6 @@ def match_face():
             frappe.log_error(f"Reference image file does not exist at path: {ref_image_path}", "Face Matching")
             return {"message": {"matched": False, "reason": "reference_image_file_not_found"}}
 
-        # if not os.path.exists(ref_image_path):
-        #     # This can happen if the file was manually deleted from the server
-        #     # Attempt to regenerate it from the File doc content
-        #     try:
-        #         with open(ref_image_path, 'wb') as f:
-        #             f.write(ref_file_doc.get_content())
-        #         frappe.log_error(f"Reference image file was missing, regenerated at: {ref_image_path}", "Face Matching")
-        #     except Exception as regen_e:
-        #         frappe.log_error(f"Reference image file does not exist and could not be regenerated: {ref_image_path}, Error: {regen_e}", "Face Matching")
-        #         return {"message": {"matched": False, "reason": "reference_image_file_not_found"}}
-        
         # Correct reference image if needed
         if not correct_image_orientation(ref_image_path):
             return {"message": {"matched": False, "reason": "reference_image_corruption"}}
@@ -652,17 +478,6 @@ def match_face():
                 checkin_doc.insert(ignore_permissions=True)
                 frappe.db.commit()
 
-                # Link the existing file to the Employee Checkin document
-                # save_file(
-                #     filename,
-                #     file_content,
-                #     "Employee Checkin",
-                #     checkin_doc.name,
-                #     folder="Home",
-                #     is_private=0
-                # )
-                # frappe.db.commit()
-
                 return {
                     "message": {
                         "matched": True,
@@ -710,11 +525,3 @@ def match_face():
                     frappe.log(f"Deleted temporary file: {file_path}")
             except Exception as e:
                 frappe.log_error(f"Failed to delete {file_path}: {str(e)}", "File Cleanup Error")
-
-@frappe.whitelist(allow_guest=True)
-def get_test_doc():
-    try:
-        doc = frappe.get_last_doc("ToDo")
-        return {"name": doc.name, "description": doc.description}
-    except:
-        return {"error": "No ToDo documents found"}
