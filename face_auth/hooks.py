@@ -9,6 +9,8 @@ override_whitelisted_methods = {
     "face_auth.register_face": "face_auth.api.face.register_face",
     "face_auth.match_face": "face_auth.api.face.match_face",
     "face_auth.get_test_doc": "face_auth.api.face.get_test_doc",
+    "face_auth.reset_face_registration": "face_auth.api.face.reset_face_registration",
+    "face_auth.update_face": "face_auth.api.face.update_face",
 }
 # Add HRMS as a dependency
 required_apps = ["hrms"]  # This ensures HRMS is installed
