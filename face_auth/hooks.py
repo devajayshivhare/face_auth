@@ -8,9 +8,12 @@ app_license = "mit"
 override_whitelisted_methods = {
     "face_auth.register_face": "face_auth.api.face.register_face",
     "face_auth.match_face": "face_auth.api.face.match_face",
-    "face_auth.get_test_doc": "face_auth.api.face.get_test_doc",
+    # "face_auth.get_test_doc": "face_auth.api.face.get_test_doc",
     "face_auth.reset_face_registration": "face_auth.api.face.reset_face_registration",
     "face_auth.update_face": "face_auth.api.face.update_face",
+    "face_auth.track_location": "face_auth.api.face.track_location",
+    "face_auth.get_latest_locations": "face_auth.api.face.get_latest_locations",
+    "face_auth.get_historical_path": "face_auth.api.face.get_historical_path",
 }
 # Add HRMS as a dependency
 required_apps = ["hrms"]  # This ensures HRMS is installed

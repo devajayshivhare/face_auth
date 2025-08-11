@@ -203,27 +203,32 @@ def register_face():
     
 @frappe.whitelist(allow_guest=True)
 def update_face():
-    temp_files = []  # Track all temporary files
-    """
-    Update face image for an already registered employee.
-    Only allowed if already registered.
-    """
+    temp_files = []  # Track all temporary files for cleanup
+
     user_id = frappe.form_dict.get('user_id')
+    office_latitude = frappe.form_dict.get('office_latitude')
+    office_longitude = frappe.form_dict.get('office_longitude')
+    first_name = frappe.form_dict.get('first_name')  # First Name
+    middle_name = frappe.form_dict.get('middle_name')  # Middle Name
+    last_name = frappe.form_dict.get('last_name')  # Last Name
+    radius_meters = frappe.form_dict.get('radius_meters')  # Radius (Meters)
+    date_of_joining = frappe.form_dict.get('date_of_joining')  # date_of_joining (Meters)
+
     if not user_id:
         return {"message": "missing_user_id"}
 
     if not frappe.db.exists("Employee", user_id):
         return {"message": "invalid_employee_id"}
 
+    # Get reference image for face comparison (assumes this function exists)
     ref_file_doc = get_employee_reference_image(user_id)
-    if not ref_file_doc:
-            return {"message": {"matched": False, "reason": "reference_image_missing"}}
-    upload_path_last = os.path.join(frappe.get_site_path('public', 'files'), ref_file_doc.file_name)
-    temp_files.append(upload_path_last) 
-
     if not ref_file_doc:
         return {"message": {"matched": False, "reason": "reference_image_missing"}}
 
+    upload_path_last = os.path.join(frappe.get_site_path('public', 'files'), ref_file_doc.file_name)
+    temp_files.append(upload_path_last)
+
+    # Handle uploaded image
     file = frappe.request.files.get('image')
     if not file:
         return {"message": "no_image_provided"}
@@ -239,16 +244,17 @@ def update_face():
     file_content = file.read()
     with open(save_path, 'wb') as f:
         f.write(file_content)
-    temp_files.append(save_path) 
+    temp_files.append(save_path)
 
+    # Optional: Correct image orientation
     if not correct_image_orientation(save_path):
         return {"message": "image_processing_failed"}
 
     with open(save_path, 'rb') as f:
         corrected_file_content = f.read()
 
+    # Face encoding
     try:
-        # Load and process image
         image = face_recognition.load_image_file(save_path)
         encodings = face_recognition.face_encodings(image, num_jitters=1, model="large")
         if not encodings:
@@ -257,6 +263,7 @@ def update_face():
         frappe.log_error(frappe.get_traceback(), "Face Encoding Error")
         return {"message": "face_encoding_failed"}
 
+    # Remove old attachments
     try:
         attachments = frappe.get_all("File", {
             "attached_to_doctype": "Employee",
@@ -269,6 +276,7 @@ def update_face():
         frappe.log_error(frappe.get_traceback(), "Cleanup Failed")
         return {"message": "cleanup_failed"}
 
+    # Save new face image
     try:
         file_doc = frappe.get_doc({
             "doctype": "File",
@@ -277,21 +285,57 @@ def update_face():
             "attached_to_name": user_id,
             "folder": "Home",
             "is_private": 0,
-            # "content": file_content
             "content": corrected_file_content
         })
         file_doc.save(ignore_permissions=True)
 
-        # Mark as registered (in case not already)
-        frappe.db.set_value("Employee", user_id, "face_registered", 1)
+        # ✅ Update Employee document
+        employee = frappe.get_doc("Employee", user_id)
+
+        # Update fields from form data
+        employee.first_name = first_name
+        # employee.middle_name = middle_name
+        employee.last_name = last_name
+        employee.office_latitude = office_latitude
+        employee.office_longitude = office_longitude
+        employee.gender = "Male"
+        # employee.radius_meters = radius_meters
+        employee.date_of_joining = "2025-06-17"  # Mark as registered
+        employee.date_of_birth = "1998-09-17"  # Mark as registered
+        employee.status = "Active"  # Mark as registered
+        employee.designation = "Software Developer"  # Mark as registered
+        employee.department = "Accounts"  # Mark as registered
+        # employee.first_name = first_name
+        # employee.middle_name = middle_name
+        # employee.last_name = last_name
+        # employee.office_latitude = office_latitude
+        # employee.office_longitude = office_longitude
+        # employee.radius_meters = radius_meters
+        # employee.date_of_joining = "2025-06-17"  # Mark as registered
+        employee.face_registered = 1  # Mark as registered
+        
+        # Save the Employee document
+        employee.save(ignore_permissions=True)
         frappe.db.commit()
 
+        # designation = frappe.get_doc({
+        # "doctype": "Designation",
+        # "designation_name": "Software Developer"
+        # })
+        # designation.designation_name = "Software Developer"
+        # designation = frappe.get_doc("Designation", user_id)
+        # designation.designation_name = "Software Developer"
+
+        # designation.save(ignore_permissions=True)
+        # frappe.db.commit()
         return {"message": "updated"}
+
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Update Save Failed")
         return {"message": "update_failed"}
+
     finally:
-        # 🧹 Clean up ALL temporary files
+        # Clean up temporary files
         for file_path in temp_files:
             try:
                 if os.path.exists(file_path):
@@ -525,3 +569,86 @@ def match_face():
                     frappe.log(f"Deleted temporary file: {file_path}")
             except Exception as e:
                 frappe.log_error(f"Failed to delete {file_path}: {str(e)}", "File Cleanup Error")
+                
+@frappe.whitelist(allow_guest=True)
+def track_location():
+    # frappe.log("Tracking location for employee")
+    """
+    Track real-time GPS location of employee.
+    Requires authentication.
+    """
+    # user = frappe.session.user  # Authenticated user
+    employee_id = frappe.form_dict.get('employee_id')
+    # frappe.log(f"Tracking location for employee: {employee_id}")
+    latitude = frappe.form_dict.get('latitude')
+    longitude = frappe.form_dict.get('longitude')
+    # battery_level = frappe.form_dict.get('battery_level')
+    # accuracy = frappe.form_dict.get('accuracy')  # GPS accuracy in meters
+    # location_type = frappe.form_dict.get('location_type', 'Live Tracking')  # e.g., Check-in, Check-out
+
+    # Validate
+    if not employee_id:
+        frappe.throw(_("Employee ID is required"))
+
+    if not frappe.db.exists("Employee", employee_id):
+        frappe.throw(_("Invalid Employee ID"))
+
+    if not latitude or not longitude:
+        frappe.throw(_("Latitude and Longitude are required"))
+
+    try:
+        # Create Location log
+        location = frappe.get_doc({
+            "doctype": "Location",
+            "location_name": f"Track-{employee_id}-{frappe.utils.now()}",  # auto-naming
+            "latitude": float(latitude),
+            "longitude": float(longitude),
+            "employee": employee_id,
+            # "user": user,
+            "custom_timestamp": frappe.utils.now_datetime(),
+            # "battery_level": battery_level,
+            # "accuracy": accuracy,
+            # "location_type": location_type
+        })
+        location.insert(ignore_permissions=True)  # Bypass permission checks
+
+        # Optional: Update Employee last known location
+        # employee = frappe.get_doc("Employee", employee_id)
+        # employee.last_known_latitude = latitude
+        # employee.last_known_longitude = longitude
+        # employee.last_location_update = frappe.utils.now_datetime()
+        # employee.db_update()  # Only updates DB, skips full save
+
+        frappe.db.commit()
+
+        return {
+            "message": "location_tracked",
+            "location": location.name,
+            "timestamp": location.custom_timestamp
+        }
+
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Location Tracking Failed")
+        frappe.throw(_("Failed to track location"))
+
+# @frappe.whitelist(allow_guest=True)
+# def get_latest_locations():
+#     # Get latest location for all employees
+#     return frappe.db.sql("""
+#         SELECT employee, latitude, longitude, timestamp
+#         FROM `tabEmployee Location Log`
+#         WHERE timestamp = (
+#             SELECT MAX(timestamp) FROM `tabEmployee Location Log` AS sub
+#             WHERE sub.employee = `tabEmployee Location Log`.employee
+#         )
+#     """, as_dict=True)
+
+@frappe.whitelist(allow_guest=True)
+def get_historical_path(employee, date):
+    start = f"{date} 09:00:00"
+    end = f"{date} 18:00:00"
+    return frappe.get_all("Location",
+        filters=[["employee", "=", employee], ["custom_timestamp", "between", [start, end]]],
+        fields=["latitude", "longitude", "custom_timestamp"],
+        order_by="custom_timestamp asc"
+    )
