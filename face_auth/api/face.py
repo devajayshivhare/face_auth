@@ -120,17 +120,36 @@ def get_employee_reference_image(employee_id):
 def register_face():
     temp_files = []  # Track all temporary files
 
-    user_id = frappe.form_dict.get('user_id')
-    if not user_id:
-        return {"message": "missing_user_id"}
+    # user_id = frappe.form_dict.get('user_id')
+    first_name = frappe.form_dict.get('first_name')  # First Name
+    middle_name = frappe.form_dict.get('middle_name')  # Middle Name
+    last_name = frappe.form_dict.get('last_name')  # Last Name
+    
+    gender = frappe.form_dict.get('gender')  # Gender
+    date_of_birth = frappe.form_dict.get('date_of_birth')  # date_of_birth   ("YYYY-MM-DD")
+    
+    date_of_joining = frappe.form_dict.get('date_of_joining')  # date_of_joining
+    status = frappe.form_dict.get('status')  # status
+    office_latitude = frappe.form_dict.get('office_latitude')
+    office_longitude = frappe.form_dict.get('office_longitude')
+    radius_meters = frappe.form_dict.get('radius_meters')  # Radius (Meters)
+    
+    embedding_json = frappe.form_dict.get('embedding_json')  # embedding_json
+    
+    company = frappe.form_dict.get('company')  # designation
+    designation = frappe.form_dict.get('designation')  # designation
+    department = frappe.form_dict.get('department')  # department
+    
+    # if not user_id:
+    #     return {"message": "missing_user_id"}
 
     # Verify Employee document exists
-    if not frappe.db.exists("Employee", user_id):
-        return {"message": "invalid_employee_id"}
+    # if not frappe.db.exists("Employee", user_id):
+    #     return {"message": "invalid_employee_id"}
     
     # Check if already registered
-    if frappe.db.get_value("Employee", user_id, "face_registered"):
-        return {"message": "already_registered"}
+    # if frappe.db.get_value("Employee", user_id, "face_registered"):
+    #     return {"message": "already_registered"}
 
     file = frappe.request.files.get('image')
     if not file:
@@ -171,20 +190,40 @@ def register_face():
 
     # Save attachment (ignore permissions for guest)
     try:
+        # ✅ Register Employee document
+        employee = frappe.get_doc({
+                    "doctype": "Employee",
+                    "first_name": first_name,
+                    "middle_name": middle_name,
+                    "last_name": last_name,
+                    "gender": gender,
+                    "date_of_birth": date_of_birth,
+                    "status": status,
+                    "date_of_joining": date_of_joining,
+                    "office_latitude": office_latitude,
+                    "office_longitude": office_longitude,
+                    "radius_meters": radius_meters,
+                    "embedding_json": embedding_json,
+                    "company": company,
+                    "designation": designation,
+                    "department": department,
+                    "face_registered": 1,  # Mark as registered
+                })
+      
+        employee.save(ignore_permissions=True)
+        frappe.db.commit()
+        
         file_doc = frappe.get_doc({
             "doctype": "File",
             "file_name": new_filename,
             "attached_to_doctype": "Employee",
-            "attached_to_name": user_id,
+            "attached_to_name": employee.name,
             "folder": "Home",
             "is_private": 0,
             # "content": file_content
             "content": corrected_file_content 
         })
         file_doc.save(ignore_permissions=True)
-
-        # Mark employee as face-registered
-        frappe.db.set_value("Employee", user_id, "face_registered", 1)
         frappe.db.commit()
 
         return {"message": "success"}
@@ -205,23 +244,35 @@ def register_face():
 def update_face():
     temp_files = []  # Track all temporary files for cleanup
 
-    user_id = frappe.form_dict.get('user_id')
-    office_latitude = frappe.form_dict.get('office_latitude')
-    office_longitude = frappe.form_dict.get('office_longitude')
+    employee_id = frappe.form_dict.get('employee_id')
     first_name = frappe.form_dict.get('first_name')  # First Name
     middle_name = frappe.form_dict.get('middle_name')  # Middle Name
     last_name = frappe.form_dict.get('last_name')  # Last Name
+    
+    gender = frappe.form_dict.get('gender')  # Gender
+    date_of_birth = frappe.form_dict.get('date_of_birth')  # date_of_birth   ("YYYY-MM-DD")
+    
+    status = frappe.form_dict.get('status')  # status
+    date_of_joining = frappe.form_dict.get('date_of_joining')  # date_of_joining
+    office_latitude = frappe.form_dict.get('office_latitude')
+    office_longitude = frappe.form_dict.get('office_longitude')
     radius_meters = frappe.form_dict.get('radius_meters')  # Radius (Meters)
-    date_of_joining = frappe.form_dict.get('date_of_joining')  # date_of_joining (Meters)
+    
+    embedding_json = frappe.form_dict.get('embedding_json')  # embedding_json
+    
+    company = frappe.form_dict.get('company')  # designation
+    designation = frappe.form_dict.get('designation')  # designation
+    department = frappe.form_dict.get('department')  # department
+    
 
-    if not user_id:
-        return {"message": "missing_user_id"}
+    # if not user_id:
+    #     return {"message": "missing_user_id"}
 
-    if not frappe.db.exists("Employee", user_id):
-        return {"message": "invalid_employee_id"}
+    # if not frappe.db.exists("Employee", user_id):
+    #     return {"message": "invalid_employee_id"}
 
     # Get reference image for face comparison (assumes this function exists)
-    ref_file_doc = get_employee_reference_image(user_id)
+    ref_file_doc = get_employee_reference_image(employee_id)
     if not ref_file_doc:
         return {"message": {"matched": False, "reason": "reference_image_missing"}}
 
@@ -267,7 +318,7 @@ def update_face():
     try:
         attachments = frappe.get_all("File", {
             "attached_to_doctype": "Employee",
-            "attached_to_name": user_id
+            "attached_to_name": employee_id
         })
         for attach in attachments:
             doc = frappe.get_doc("File", attach.name)
@@ -278,56 +329,40 @@ def update_face():
 
     # Save new face image
     try:
+        # ✅ Update Employee document
+        employee = frappe.get_doc({
+                    "doctype": "Employee",
+                    "first_name": first_name,
+                    "middle_name": middle_name,
+                    "last_name": last_name,
+                    "gender": gender,
+                    "date_of_birth": date_of_birth,
+                    "status": status,
+                    "date_of_joining": date_of_joining,
+                    "office_latitude": office_latitude,
+                    "office_longitude": office_longitude,
+                    "radius_meters": radius_meters,
+                    "embedding_json": embedding_json,
+                    "company": company,
+                    "designation": designation,
+                    "department": department,
+                    "face_registered": 1,  # Mark as registered
+                })
+      
+        employee.save(ignore_permissions=True)
+        frappe.db.commit()
+        
         file_doc = frappe.get_doc({
             "doctype": "File",
             "file_name": new_filename,
             "attached_to_doctype": "Employee",
-            "attached_to_name": user_id,
+            "attached_to_name": employee.name,
             "folder": "Home",
             "is_private": 0,
             "content": corrected_file_content
         })
         file_doc.save(ignore_permissions=True)
 
-        # ✅ Update Employee document
-        employee = frappe.get_doc("Employee", user_id)
-
-        # Update fields from form data
-        employee.first_name = first_name
-        # employee.middle_name = middle_name
-        employee.last_name = last_name
-        employee.office_latitude = office_latitude
-        employee.office_longitude = office_longitude
-        employee.gender = "Male"
-        # employee.radius_meters = radius_meters
-        employee.date_of_joining = "2025-06-17"  # Mark as registered
-        employee.date_of_birth = "1998-09-17"  # Mark as registered
-        employee.status = "Active"  # Mark as registered
-        employee.designation = "Software Developer"  # Mark as registered
-        employee.department = "Accounts"  # Mark as registered
-        # employee.first_name = first_name
-        # employee.middle_name = middle_name
-        # employee.last_name = last_name
-        # employee.office_latitude = office_latitude
-        # employee.office_longitude = office_longitude
-        # employee.radius_meters = radius_meters
-        # employee.date_of_joining = "2025-06-17"  # Mark as registered
-        employee.face_registered = 1  # Mark as registered
-        
-        # Save the Employee document
-        employee.save(ignore_permissions=True)
-        frappe.db.commit()
-
-        # designation = frappe.get_doc({
-        # "doctype": "Designation",
-        # "designation_name": "Software Developer"
-        # })
-        # designation.designation_name = "Software Developer"
-        # designation = frappe.get_doc("Designation", user_id)
-        # designation.designation_name = "Software Developer"
-
-        # designation.save(ignore_permissions=True)
-        # frappe.db.commit()
         return {"message": "updated"}
 
     except Exception as e:
@@ -345,21 +380,21 @@ def update_face():
                 frappe.log_error(f"Failed to delete {file_path}: {str(e)}", "File Cleanup Error")
     
 @frappe.whitelist(allow_guest=True)
-def reset_face_registration(user_id):
+def reset_face_registration(employee_id):
     """
     Resets the face registration for an employee by setting the flag to 0
     and deleting all associated face registration file attachments.
     """
-    if not frappe.db.exists("Employee", user_id):
+    if not frappe.db.exists("Employee", employee_id):
         return {"status": "error", "message": "invalid_employee_id"}
 
     # Set the registration flag to 0 (unregistered)
-    frappe.db.set_value("Employee", user_id, "face_registered", 0)
+    frappe.db.set_value("Employee", employee_id, "face_registered", 0)
 
     # Find all 'File' documents attached to this employee
     attachments = frappe.get_all("File", filters={
         "attached_to_doctype": "Employee",
-        "attached_to_name": user_id
+        "attached_to_name": employee_id
     }, fields=["name", "file_name"])
 
     if not attachments:
@@ -384,11 +419,11 @@ def reset_face_registration(user_id):
 def match_face():
     temp_files = []  # Track all temporary files
 
-    user_id = frappe.form_dict.get('user_id')
+    employee_id = frappe.form_dict.get('employee_id')
     latitude = frappe.form_dict.get('latitude')
     longitude = frappe.form_dict.get('longitude')
     device_id = frappe.form_dict.get('device_id')
-    if not user_id:
+    if not employee_id:
         return {"message": {"matched": False, "reason": "missing_user_id"}}
 
     try:
@@ -418,14 +453,14 @@ def match_face():
         uploaded_encoding = uploaded_encodings[0]
 
 
-        ref_file_doc = get_employee_reference_image(user_id)
+        ref_file_doc = get_employee_reference_image(employee_id)
         if not ref_file_doc:
             return {"message": {"matched": False, "reason": "reference_image_missing"}}
         ref_image_path = os.path.join(frappe.get_site_path('public', 'files'), ref_file_doc.file_name)
 
         # ✅ FIX: Properly validate ref_image_path before using os.path.exists()
         if not ref_image_path:
-            frappe.log_error(f"Reference image path is None for {user_id}", "Face Matching")
+            frappe.log_error(f"Reference image path is None for {employee_id}", "Face Matching")
             return {"message": {"matched": False, "reason": "reference_image_missing"}}
         
         if not os.path.exists(ref_image_path):
@@ -471,7 +506,7 @@ def match_face():
                 longitude = float(longitude)
                 
                 # Get office coordinates from Employee document
-                office_lat, office_long, geofence_radius = get_office_coordinates(user_id)
+                office_lat, office_long, geofence_radius = get_office_coordinates(employee_id)
                 
                 # Check if coordinates are valid
                 if not office_lat or not office_long:
@@ -508,7 +543,7 @@ def match_face():
                 # Create checkin record (only if within geofence)
                 checkin_doc = frappe.get_doc({
                     "doctype": "Employee Checkin",
-                    "employee": user_id,
+                    "employee": employee_id,
                     "time": frappe.utils.now_datetime(),
                     "device_id": device_id,
                     "latitude": latitude,
