@@ -4,7 +4,7 @@ import face_recognition
 import numpy as np
 from PIL import Image, ExifTags
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from frappe.desk.form.load import get_attachments
 
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -116,6 +116,127 @@ def get_employee_reference_image(employee_id):
     except frappe.DoesNotExistError:
         return None
     
+# def get_shift_time_range(employee_id, date_str):
+#     """
+#     Calculate shift time window considering night shifts
+#     Returns (start_datetime, end_datetime) in ISO format
+#     """
+#     # Default fallback (9AM-6PM)
+#     default_start = "09:00:00"
+#     default_end = "18:00:00"
+    
+#     # Get employee's shift
+#     shift_name = frappe.get_value("Employee", employee_id, "shift")
+#     if not shift_name:
+#         return (
+#             f"{date_str} {default_start}",
+#             f"{date_str} {default_end}"
+#         )
+    
+#     # Fetch shift details
+#     shift = frappe.get_doc("Shift Type", shift_name)
+#     start_time = shift.start_time.strftime("%H:%M:%S")
+#     end_time = shift.end_time.strftime("%H:%M:%S")
+    
+#     # Handle night shifts (crossing midnight)
+#     if shift.is_night_shift or shift.end_time < shift.start_time:
+#         next_date = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+#         return (
+#             f"{date_str} {start_time}",
+#             f"{next_date} {end_time}"
+#         )
+    
+#     return (
+#         f"{date_str} {start_time}",
+#         f"{date_str} {end_time}"
+#     )
+# def get_shift_time_range(employee_id, date_str):
+#     """
+#     Calculate shift time window considering night shifts
+#     Returns (start_datetime, end_datetime) in ISO format
+#     """
+#     # Default fallback (9AM-6PM)
+#     default_start = "09:00:00"
+#     default_end = "18:00:00"
+    
+#     # Get employee's shift
+#     shift_name = frappe.get_value("Employee", employee_id, "shift")
+#     if not shift_name:
+#         return (
+#             f"{date_str} {default_start}",
+#             f"{date_str} {default_end}"
+#         )
+    
+#     # Fetch shift details
+#     shift = frappe.get_doc("Shift Type", shift_name)
+    
+#     # CORRECT WAY TO HANDLE TIME FIELDS IN FRAPPE
+#     # Time fields in Frappe are stored as timedelta objects
+#     def format_timedelta(td):
+#         if not td:
+#             return "00:00:00"
+#         total_seconds = int(td.total_seconds())
+#         hours = total_seconds // 3600
+#         minutes = (total_seconds % 3600) // 60
+#         seconds = total_seconds % 60
+#         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    
+#     start_time = format_timedelta(shift.start_time)
+#     end_time = format_timedelta(shift.end_time)
+    
+#     # Handle night shifts (crossing midnight)
+#     # Compare as strings in HH:MM:SS format for proper time comparison
+#     if shift.is_night_shift or end_time < start_time:
+#         next_date = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+#         return (
+#             f"{date_str} {start_time}",
+#             f"{next_date} {end_time}"
+#         )
+    
+#     return (
+#         f"{date_str} {start_time}",
+#         f"{date_str} {end_time}"
+#     )
+    
+def get_shift_time_range(employee_id, date_str):
+    """
+    Calculate shift time window considering night shifts
+    Returns (start_datetime, end_datetime) as datetime objects
+    """
+    # Default fallback (9AM-6PM)
+    default_start = "09:00:00"
+    default_end = "18:00:00"
+    
+    # Get employee's shift
+    shift_name = frappe.get_value("Employee", employee_id, "shift")
+    if not shift_name:
+        from datetime import datetime, timedelta
+        start_dt = datetime.strptime(f"{date_str} {default_start}", "%Y-%m-%d %H:%M:%S")
+        end_dt = datetime.strptime(f"{date_str} {default_end}", "%Y-%m-%d %H:%M:%S")
+        return (start_dt, end_dt)
+    
+    # Fetch shift details
+    shift = frappe.get_doc("Shift Type", shift_name)
+    
+    # Format time properly
+    from frappe.utils import format_time
+    
+    start_time = format_time(shift.start_time, "HH:mm:ss") if shift.start_time else "09:00:00"
+    end_time = format_time(shift.end_time, "HH:mm:ss") if shift.end_time else "18:00:00"
+    
+    # Handle night shifts (crossing midnight)
+    if shift.is_night_shift or end_time < start_time:
+        from datetime import datetime, timedelta
+        next_date = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        start_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M:%S")
+        end_dt = datetime.strptime(f"{next_date} {end_time}", "%Y-%m-%d %H:%M:%S")
+        return (start_dt, end_dt)
+    
+    from datetime import datetime
+    start_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M:%S")
+    end_dt = datetime.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M:%S")
+    return (start_dt, end_dt)
+
 @frappe.whitelist(allow_guest=True)
 def register_face():
     temp_files = []  # Track all temporary files
@@ -139,6 +260,8 @@ def register_face():
     company = frappe.form_dict.get('company')  # designation
     designation = frappe.form_dict.get('designation')  # designation
     department = frappe.form_dict.get('department')  # department
+    
+    shift = frappe.form_dict.get('shift')  # NEW: Get shift from request
     
     # if not user_id:
     #     return {"message": "missing_user_id"}
@@ -207,6 +330,7 @@ def register_face():
                     "company": company,
                     "designation": designation,
                     "department": department,
+                    "shift": shift,  # Save shift
                     "face_registered": 1,  # Mark as registered
                 })
       
@@ -264,6 +388,7 @@ def update_face():
     designation = frappe.form_dict.get('designation')  # designation
     department = frappe.form_dict.get('department')  # department
     
+    shift = frappe.form_dict.get('shift')
 
     # if not user_id:
     #     return {"message": "missing_user_id"}
@@ -346,6 +471,7 @@ def update_face():
                     "company": company,
                     "designation": designation,
                     "department": department,
+                    "shift": shift,
                     "face_registered": 1,  # Mark as registered
                 })
       
@@ -670,20 +796,287 @@ def track_location():
 # def get_latest_locations():
 #     # Get latest location for all employees
 #     return frappe.db.sql("""
-#         SELECT employee, latitude, longitude, timestamp
-#         FROM `tabEmployee Location Log`
-#         WHERE timestamp = (
-#             SELECT MAX(timestamp) FROM `tabEmployee Location Log` AS sub
-#             WHERE sub.employee = `tabEmployee Location Log`.employee
+#         SELECT employee, latitude, longitude, custom_timestamp
+#         FROM `tabLocation`
+#         WHERE custom_timestamp = (
+#             SELECT MAX(custom_timestamp) FROM `tabLocation` AS sub
+#             WHERE sub.employee = `tabLocation`.employee
 #         )
 #     """, as_dict=True)
 
 @frappe.whitelist(allow_guest=True)
+def get_latest_locations(employee_id=None):
+    """
+    Get latest location for all employees or for a specific employee
+    Args:
+        employee_id (str, optional): Employee ID to filter by
+    """
+    if employee_id:
+        # Get latest location for a specific employee
+        return frappe.db.sql("""
+            SELECT employee, latitude, longitude, custom_timestamp
+            FROM `tabLocation`
+            WHERE employee = %s
+            ORDER BY custom_timestamp DESC
+            LIMIT 1
+        """, employee_id, as_dict=True)
+    else:
+        # Get latest location for all employees (current behavior)
+        return frappe.db.sql("""
+            SELECT employee, latitude, longitude, custom_timestamp
+            FROM `tabLocation`
+            WHERE custom_timestamp = (
+                SELECT MAX(custom_timestamp) FROM `tabLocation` AS sub
+                WHERE sub.employee = `tabLocation`.employee
+            )
+        """, as_dict=True)
+
+# @frappe.whitelist(allow_guest=True)
+# def get_historical_path(employee, date):
+#     # frappe.error_log(date)
+#     start = f"{date} 09:00:00"
+#     end = f"{date} 18:00:00"
+#     frappe.log(f"Fetching historical path for {employee} from {start} to {end}")
+#     return frappe.get_all("Location",
+#         filters=[["employee", "=", employee], ["custom_timestamp", "between", [start, end]]],
+#         fields=["latitude", "longitude", "custom_timestamp"],
+#         order_by="custom_timestamp asc"
+#     )
+@frappe.whitelist(allow_guest=True)
 def get_historical_path(employee, date):
-    start = f"{date} 09:00:00"
-    end = f"{date} 18:00:00"
+    """Single employee path using shift times"""
+    start, end = get_shift_time_range(employee, date)
+    frappe.log(f"Fetching historical path for {employee} from {start} to {end}")
     return frappe.get_all("Location",
-        filters=[["employee", "=", employee], ["custom_timestamp", "between", [start, end]]],
+        filters=[
+            ["employee", "=", employee],
+            ["custom_timestamp", "between", [start, end]]
+        ],
         fields=["latitude", "longitude", "custom_timestamp"],
         order_by="custom_timestamp asc"
     )
+
+@frappe.whitelist(allow_guest=True)
+def get_filtered_historical_paths(date, department=None, branch=None, employee_id=None):
+    """
+    Get historical paths with flexible filtering options:
+    - For a single employee (when employee_id is provided)
+    - For filtered employee groups (using department/branch)
+    
+    Args:
+        date (str): Date to query in YYYY-MM-DD format
+        department (str, optional): Department filter
+        branch (str, optional): branch filter
+        employee_id (str, optional): Specific employee to query
+    """
+    # Handle single employee case
+    if employee_id:
+        # Verify employee exists
+        if not frappe.db.exists("Employee", employee_id):
+            frappe.throw(_("Invalid Employee ID"))
+            
+        # Get shift time range for this employee
+        start, end = get_shift_time_range(employee_id, date)
+        
+        # Fetch locations for single employee
+        return frappe.get_all("Location",
+            filters=[
+                ["employee", "=", employee_id],
+                ["custom_timestamp", "between", [start, end]]
+            ],
+            fields=["latitude", "longitude", "custom_timestamp"],
+            order_by="custom_timestamp asc"
+        )
+    
+    # Handle filtered employee group case (existing functionality)
+    employee_filters = {}
+    if department:
+        employee_filters["department"] = department
+    if branch:
+        employee_filters["branch"] = branch
+    
+    employees = frappe.get_all("Employee", 
+        filters=employee_filters, 
+        fields=["name", "shift"]
+    )
+    
+    if not employees:
+        return []
+    
+    # Calculate time ranges for all employees
+    time_ranges = {}
+    for emp in employees:
+        start, end = get_shift_time_range(emp.name, date)
+        time_ranges[emp.name] = (start, end)
+    
+    # Determine overall time window
+    all_starts = [r[0] for r in time_ranges.values()]
+    all_ends = [r[1] for r in time_ranges.values()]
+    overall_start = min(all_starts)
+    overall_end = max(all_ends)
+    
+    # Fetch locations in one efficient query
+    locations = frappe.get_all("Location",
+        filters=[
+            ["employee", "in", [e.name for e in employees]],
+            ["custom_timestamp", "between", [overall_start, overall_end]]
+        ],
+        fields=["employee", "latitude", "longitude", "custom_timestamp"],
+        order_by="employee, custom_timestamp asc"
+    )
+    
+    # Filter locations per employee's shift window
+    result = []
+    for loc in locations:
+        emp_start, emp_end = time_ranges.get(loc.employee, (None, None))
+        if emp_start and emp_end and emp_start <= loc.custom_timestamp <= emp_end:
+            result.append(loc)
+    
+    return result
+    
+# @frappe.whitelist(allow_guest=True)
+# def get_filtered_historical_paths(date, department=None, branch=None):
+#     """All employees path with shift-aware filtering"""
+#     # Get filtered employees
+#     employee_filters = {}
+#     if department:
+#         employee_filters["department"] = department
+#     if branch:
+#         employee_filters["branch"] = branch  # Adjust field name as needed
+    
+#     employees = frappe.get_all("Employee", 
+#         filters=employee_filters, 
+#         fields=["name", "shift"]
+#     )
+    
+#     if not employees:
+#         return []
+    
+#     # Calculate time ranges for all employees
+#     time_ranges = {}
+#     for emp in employees:
+#         start, end = get_shift_time_range(emp.name, date)
+#         time_ranges[emp.name] = (start, end)
+    
+#     # Determine overall time window
+#     all_starts = [r[0] for r in time_ranges.values()]
+#     all_ends = [r[1] for r in time_ranges.values()]
+#     overall_start = min(all_starts)
+#     overall_end = max(all_ends)
+    
+#     # Fetch locations in one efficient query
+#     locations = frappe.get_all("Location",
+#         filters=[
+#             ["employee", "in", [e.name for e in employees]],
+#             ["custom_timestamp", "between", [overall_start, overall_end]]
+#         ],
+#         fields=["employee", "latitude", "longitude", "custom_timestamp"],
+#         order_by="employee, custom_timestamp asc"
+#     )
+    
+#     # Filter locations per employee's shift window
+#     result = []
+#     for loc in locations:
+#         emp_start, emp_end = time_ranges.get(loc.employee, (None, None))
+#         if emp_start and emp_end and emp_start <= loc.custom_timestamp <= emp_end:
+#             result.append(loc)
+    
+#     return result
+
+# @frappe.whitelist(allow_guest=True)
+# def get_historical_path(employee, date, start_time=None, end_time=None):
+#     """
+#     Get historical path for an employee with flexible time range
+    
+#     Args:
+#         employee: Employee ID
+#         date: Date string (YYYY-MM-DD)
+#         start_time: Optional start time (HH:MM:SS), defaults to employee's shift start
+#         end_time: Optional end time (HH:MM:SS), defaults to employee's shift end
+#     """
+#     # Get employee's shift information
+#     employee_doc = frappe.get_doc("Employee", employee)
+    
+#     # Default to 9-5 if no shift info, but try to get from employee data first
+#     default_start = "09:00:00"
+#     default_end = "18:00:00"
+    
+#     # Try to get shift times from employee document
+#     shift_start = employee_doc.custom_shift_start or default_start
+#     shift_end = employee_doc.custom_shift_end or default_end
+    
+#     # Use provided times or fallback to shift times
+#     start = f"{date} {start_time or shift_start}"
+#     end = f"{date} {end_time or shift_end}"
+    
+#     return frappe.get_all("Location",
+#         filters=[
+#             ["employee", "=", employee], 
+#             ["custom_timestamp", "between", [start, end]]
+#         ],
+#         fields=["latitude", "longitude", "custom_timestamp"],
+#         order_by="custom_timestamp asc"
+#     )
+    
+# @frappe.whitelist(allow_guest=True)
+# def get_filtered_historical_paths(date, department=None, branch=None):
+#     """
+#     Get historical paths for all employees with optional filters
+#     Args:
+#         date: Date string (YYYY-MM-DD)
+#         department: Optional department filter
+#         branch: Optional branch/area filter
+#     """
+#     start = f"{date} 00:00:00"
+#     end = f"{date} 23:59:59"
+    
+#     conditions = ["custom_timestamp BETWEEN %s AND %s"]
+#     values = [start, end]
+    
+#     if department:
+#         conditions.append("employee IN (SELECT name FROM `tabEmployee` WHERE department = %s)")
+#         values.append(department)
+    
+#     if branch:
+#         conditions.append("employee IN (SELECT name FROM `tabEmployee` WHERE branch = %s)")
+#         values.append(branch)
+    
+#     condition_str = " AND ".join(conditions)
+    
+#     return frappe.db.sql("""
+#         SELECT employee, latitude, longitude, custom_timestamp
+#         FROM `tabLocation`
+#         WHERE {condition}
+#         ORDER BY employee, custom_timestamp ASC
+#     """.format(condition=condition_str), tuple(values), as_dict=True)
+
+# @frappe.whitelist(allow_guest=True)
+# def get_filtered_historical_paths(date, department=None, branch=None, start_time=None, end_time=None):
+#     """
+#     Get historical paths for all employees with filters and flexible time range
+#     """
+#     # Determine time range - use defaults if not provided
+#     default_start = "09:00:00"
+#     default_end = "18:00:00"
+#     start = f"{date} {start_time or default_start}"
+#     end = f"{date} {end_time or default_end}"
+    
+#     conditions = ["custom_timestamp BETWEEN %s AND %s"]
+#     values = [start, end]
+    
+#     if department:
+#         conditions.append("employee IN (SELECT name FROM `tabEmployee` WHERE department = %s)")
+#         values.append(department)
+    
+#     if branch:
+#         conditions.append("employee IN (SELECT name FROM `tabEmployee` WHERE branch = %s)")
+#         values.append(branch)
+    
+#     condition_str = " AND ".join(conditions)
+    
+#     return frappe.db.sql("""
+#         SELECT employee, latitude, longitude, custom_timestamp
+#         FROM `tabLocation`
+#         WHERE {condition}
+#         ORDER BY employee, custom_timestamp ASC
+#     """.format(condition=condition_str), tuple(values), as_dict=True)

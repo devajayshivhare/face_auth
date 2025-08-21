@@ -14,6 +14,7 @@ override_whitelisted_methods = {
     "face_auth.track_location": "face_auth.api.face.track_location",
     "face_auth.get_latest_locations": "face_auth.api.face.get_latest_locations",
     "face_auth.get_historical_path": "face_auth.api.face.get_historical_path",
+    "face_auth.get_filtered_historical_paths": "face_auth.api.face.get_filtered_historical_paths",
 }
 # Add HRMS as a dependency
 required_apps = ["hrms"]  # This ensures HRMS is installed
